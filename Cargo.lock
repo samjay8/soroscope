@@ -3340,6 +3340,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "soroban-env-host",
  "soroban-sdk",
  "sqlx",
  "stellar-strkey",
@@ -3353,6 +3354,13 @@ dependencies = [
  "utoipa",
  "utoipa-swagger-ui",
  "uuid",
+]
+
+[[package]]
+name = "soroscope-math"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
 ]
 
 [[package]]

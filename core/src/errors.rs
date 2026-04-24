@@ -96,6 +96,16 @@ impl From<SimulationError> for AppError {
             SimulationError::SerializationError(e) => {
                 AppError::Internal(format!("Serialization error: {}", e))
             }
+
+            // Local-runner errors. `LocalUnavailable` should normally be
+            // handled upstream by falling back to RPC, so if it reaches the
+            // HTTP boundary treat it as an internal misconfiguration.
+            SimulationError::LocalUnavailable => AppError::Internal(
+                "Local WASM execution unavailable and no RPC fallback succeeded".to_string(),
+            ),
+            SimulationError::ExecutionFailed(msg) => {
+                AppError::BadRequest(format!("Contract execution failed: {}", msg))
+            }
         }
     }
 }

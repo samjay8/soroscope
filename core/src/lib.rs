@@ -3,4 +3,5 @@ pub mod errors;
 pub mod insights;
 pub mod parser;
 pub mod rpc_provider;
+pub mod runner;
 pub mod simulation;
