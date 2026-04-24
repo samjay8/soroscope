@@ -1,6 +1,7 @@
 use crate::parser::ArgParser;
 use crate::rpc_provider::ProviderRegistry;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use ed25519_dalek::Signer as Ed25519Signer;
 use moka::future::Cache;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -14,7 +15,6 @@ use soroban_sdk::xdr::{
     SorobanTransactionData, Transaction, TransactionExt, TransactionV1Envelope, Uint256, VecM,
     WriteXdr,
 };
-use ed25519_dalek::Signer as Ed25519Signer;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -194,7 +194,7 @@ struct SimulationRpcResult {
     results: Vec<serde_json::Value>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct ResourceCost {
     cpu_insns: String,
@@ -1222,11 +1222,11 @@ impl SimulationEngine {
         let final_deps = state_dependency;
 
         result.state_dependency = Some(final_deps);
-Ok(result)
+        Ok(result)
     }
 
     // ── Multi-account authorization simulation
-// ── Multi-account authorization simulation ────────────────────────────────
+    // ── Multi-account authorization simulation ────────────────────────────────
 
     /// Simulate a contract call requiring authorization from one or more accounts.
     ///
@@ -1272,7 +1272,6 @@ Ok(result)
             network_passphrase,
             expiration_ledger,
         )?;
-        result.ttl_analysis = None;
 
         tracing::info!(
             signers = signers.len(),
@@ -1320,9 +1319,7 @@ Ok(result)
             .iter()
             .map(|signer| match signer {
                 AuthSigner::PreSignedXdr { xdr } => {
-                    let bytes = BASE64
-                        .decode(xdr)
-                        .map_err(SimulationError::Base64Error)?;
+                    let bytes = BASE64.decode(xdr).map_err(SimulationError::Base64Error)?;
                     SorobanAuthorizationEntry::from_xdr(&bytes, Limits::none()).map_err(|e| {
                         SimulationError::XdrError(format!("Invalid auth entry XDR: {e}"))
                     })
@@ -1374,13 +1371,12 @@ Ok(result)
         let network_id: [u8; 32] = Sha256::digest(network_passphrase.as_bytes()).into();
 
         // 4. Build and hash the auth preimage
-        let preimage =
-            HashIdPreimage::SorobanAuthorization(HashIdPreimageSorobanAuthorization {
-                network_id: Hash(network_id),
-                invocation: invocation.clone(),
-                nonce,
-                signature_expiration_ledger: expiration_ledger,
-            });
+        let preimage = HashIdPreimage::SorobanAuthorization(HashIdPreimageSorobanAuthorization {
+            network_id: Hash(network_id),
+            invocation: invocation.clone(),
+            nonce,
+            signature_expiration_ledger: expiration_ledger,
+        });
         let preimage_bytes = preimage
             .to_xdr(Limits::none())
             .map_err(|e| SimulationError::XdrError(format!("Encode preimage: {e}")))?;
@@ -1412,9 +1408,9 @@ Ok(result)
         // 7. Assemble the final auth entry
         Ok(SorobanAuthorizationEntry {
             credentials: SorobanCredentials::Address(SorobanAddressCredentials {
-                address: ScAddress::Account(AccountId(PublicKey::PublicKeyTypeEd25519(
-                    Uint256(public_key),
-                ))),
+                address: ScAddress::Account(AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(
+                    public_key,
+                )))),
                 nonce,
                 signature_expiration_ledger: expiration_ledger,
                 signature: sig_map,
@@ -2035,6 +2031,7 @@ mod tests {
         };
         let json2 = serde_json::to_string(&signer2).unwrap();
         assert!(json2.contains("pre_signed_xdr"));
+    }
 
     #[test]
     fn test_build_extend_ttl_suggestions_flags_low_ttl_entries() {

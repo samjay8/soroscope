@@ -20,7 +20,7 @@ use crate::insights::InsightsEngine;
 use crate::jobs::{
     JobId, JobQueue, JobQueueConfig, JobWorker, SubmitJobRequest, SubmitJobResponse,
 };
-use crate::rpc_provider::{ProviderRegistry, RpcProvider};
+use crate::rpc_provider::{ProviderRegistry, RegistryConfig, RegistrySnapshot, RpcProvider};
 use crate::simulation::{SimulationCache, SimulationEngine, SimulationResult};
 use axum::{
     extract::{Json, Multipart, Path, State},
@@ -65,9 +65,21 @@ struct AppConfig {
     /// When empty or absent the engine falls back to `soroban_rpc_url`.
     #[serde(default)]
     rpc_providers: String,
+    /// Stable node identifier used for gossip snapshots.
+    #[serde(default)]
+    registry_instance_id: String,
+    /// Public base URL announced to peers, e.g. `https://api-a.example.com`.
+    #[serde(default)]
+    registry_public_url: String,
+    /// Seed peers as a JSON array or comma-separated list of base URLs.
+    #[serde(default)]
+    registry_seed_peers: String,
     /// Health-check interval in seconds (default 30).
     #[serde(default = "default_health_check_interval")]
     health_check_interval_secs: u64,
+    /// Gossip sync interval in seconds (default 30).
+    #[serde(default = "default_gossip_interval_secs")]
+    gossip_interval_secs: u64,
     /// Simulation timeout in seconds (default 30).
     #[serde(default = "default_simulation_timeout_secs")]
     simulation_timeout_secs: u64,
@@ -96,6 +108,10 @@ fn default_health_check_interval() -> u64 {
 }
 
 fn default_simulation_timeout_secs() -> u64 {
+    30
+}
+
+fn default_gossip_interval_secs() -> u64 {
     30
 }
 
@@ -135,7 +151,11 @@ fn load_config() -> Result<AppConfig, ConfigError> {
         .set_default("network_passphrase", "Test SDF Network ; September 2015")?
         .set_default("redis_url", "redis://127.0.0.1:6379")?
         .set_default("rpc_providers", "")?
+        .set_default("registry_instance_id", "")?
+        .set_default("registry_public_url", "")?
+        .set_default("registry_seed_peers", "")?
         .set_default("health_check_interval_secs", 30)?
+        .set_default("gossip_interval_secs", 30)?
         .set_default("simulation_timeout_secs", 30)?
         .set_default("database_url", "sqlite://soroscope.db")?
         .set_default("job_timeout_secs", 300)?
@@ -177,12 +197,57 @@ fn build_providers(config: &AppConfig) -> Vec<RpcProvider> {
         url: config.soroban_rpc_url.clone(),
         auth_header: None,
         auth_value: None,
+        advertise: None,
     }]
+}
+
+fn parse_seed_peers(raw: &str) -> Vec<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    if trimmed.starts_with('[') {
+        return serde_json::from_str::<Vec<String>>(trimmed).unwrap_or_default();
+    }
+
+    trimmed
+        .split(',')
+        .map(|peer| peer.trim().trim_end_matches('/').to_string())
+        .filter(|peer| !peer.is_empty())
+        .collect()
+}
+
+fn build_registry_config(config: &AppConfig) -> RegistryConfig {
+    let instance_id = if config.registry_instance_id.trim().is_empty() {
+        uuid::Uuid::new_v4().to_string()
+    } else {
+        config.registry_instance_id.trim().to_string()
+    };
+
+    let public_base_url = if config.registry_public_url.trim().is_empty() {
+        Some(format!("http://127.0.0.1:{}", config.server_port))
+    } else {
+        Some(
+            config
+                .registry_public_url
+                .trim()
+                .trim_end_matches('/')
+                .to_string(),
+        )
+    };
+
+    RegistryConfig {
+        instance_id,
+        public_base_url,
+        seed_peers: parse_seed_peers(&config.registry_seed_peers),
+    }
 }
 
 /// Shared application state injected into every Axum handler via [`State`].
 struct AppState {
     engine: SimulationEngine,
+    provider_registry: Arc<ProviderRegistry>,
     cache: Arc<SimulationCache>,
     insights_engine: InsightsEngine,
     /// Simulation timeout for RPC requests
@@ -398,30 +463,33 @@ fn to_report(result: &SimulationResult, insights_engine: &InsightsEngine) -> Res
                 })
                 .collect()
         }),
-        ttl_analysis: result.ttl_analysis.as_ref().map(|ttl| TtlAnalysisApiReport {
-            current_ledger: ttl.current_ledger,
-            touched_entries: ttl
-                .touched_entries
-                .iter()
-                .map(|e| TtlEntryApiReport {
-                    key: e.key.clone(),
-                    live_until_ledger: e.live_until_ledger,
-                    remaining_ledgers: e.remaining_ledgers,
-                })
-                .collect(),
-            extend_ttl_suggestions: ttl
-                .extend_ttl_suggestions
-                .iter()
-                .map(|s| ExtendTtlSuggestionApi {
-                    key: s.key.clone(),
-                    current_live_until_ledger: s.current_live_until_ledger,
-                    remaining_ledgers: s.remaining_ledgers,
-                    extend_to_ledger: s.extend_to_ledger,
-                    ledgers_to_extend_by: s.ledgers_to_extend_by,
-                    suggested_operation: s.suggested_operation.clone(),
-                })
-                .collect(),
-        }),
+        ttl_analysis: result
+            .ttl_analysis
+            .as_ref()
+            .map(|ttl| TtlAnalysisApiReport {
+                current_ledger: ttl.current_ledger,
+                touched_entries: ttl
+                    .touched_entries
+                    .iter()
+                    .map(|e| TtlEntryApiReport {
+                        key: e.key.clone(),
+                        live_until_ledger: e.live_until_ledger,
+                        remaining_ledgers: e.remaining_ledgers,
+                    })
+                    .collect(),
+                extend_ttl_suggestions: ttl
+                    .extend_ttl_suggestions
+                    .iter()
+                    .map(|s| ExtendTtlSuggestionApi {
+                        key: s.key.clone(),
+                        current_live_until_ledger: s.current_live_until_ledger,
+                        remaining_ledgers: s.remaining_ledgers,
+                        extend_to_ledger: s.extend_to_ledger,
+                        ledgers_to_extend_by: s.ledgers_to_extend_by,
+                        suggested_operation: s.suggested_operation.clone(),
+                    })
+                    .collect(),
+            }),
         nutrition: NutritionReport {
             efficiency_score: insights_report.efficiency_score,
             insights: insights_report
@@ -804,7 +872,7 @@ async fn fee_recommend(
 ) -> Result<Json<FeeRecommendationResponse>, AppError> {
     use crate::fee_analytics::TrendDirection;
 
-    tracing::info("Generating fee recommendation");
+    tracing::info!("Generating fee recommendation");
 
     // Get recent samples for analysis
     let samples = state
@@ -821,14 +889,13 @@ async fn fee_recommend(
 
     // Generate prediction
     let prediction = state.fee_analytics_engine.predict(&samples, current_ledger);
-    let market_conditions = state.fee_analytics_engine.get_market_conditions(&samples, current_ledger);
+    let market_conditions = state
+        .fee_analytics_engine
+        .get_market_conditions(&samples, current_ledger);
     let model_breakdown = state.fee_analytics_engine.get_model_breakdown(&samples);
 
     // Determine recommended bid based on prediction
-    let (recommended_bid, expected_ledgers) = (
-        prediction.priority_bid,
-        1,
-    );
+    let (recommended_bid, expected_ledgers) = (prediction.priority_bid, 1);
 
     Ok(Json(FeeRecommendationResponse {
         recommended_bid,
@@ -859,7 +926,7 @@ async fn fee_recommend(
 async fn fee_history(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<FeeHistoryResponse>, AppError> {
-    tracing::info("Fetching fee history");
+    tracing::info!("Fetching fee history");
 
     let limit = 50; // Default limit
     let samples = state
@@ -892,7 +959,7 @@ async fn fee_history(
 async fn fee_analytics(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    tracing::info("Fetching fee analytics");
+    tracing::info!("Fetching fee analytics");
 
     // Get recent samples for analysis
     let samples = state
@@ -907,7 +974,9 @@ async fn fee_analytics(
         .unwrap_or(0);
 
     let prediction = state.fee_analytics_engine.predict(&samples, current_ledger);
-    let market_conditions = state.fee_analytics_engine.get_market_conditions(&samples, current_ledger);
+    let market_conditions = state
+        .fee_analytics_engine
+        .get_market_conditions(&samples, current_ledger);
     let model_breakdown = state.fee_analytics_engine.get_model_breakdown(&samples);
 
     let response = serde_json::json!({
@@ -959,6 +1028,26 @@ struct ApiDoc;
 
 async fn health_check() -> &'static str {
     "OK"
+}
+
+async fn registry_providers(
+    State(state): State<Arc<AppState>>,
+) -> Json<Vec<crate::rpc_provider::ProviderHealthReport>> {
+    Json(state.provider_registry.provider_reports().await)
+}
+
+async fn registry_peers(
+    State(state): State<Arc<AppState>>,
+) -> Json<Vec<crate::rpc_provider::PeerHealthReport>> {
+    Json(state.provider_registry.peer_reports().await)
+}
+
+async fn registry_gossip(
+    State(state): State<Arc<AppState>>,
+    Json(snapshot): Json<RegistrySnapshot>,
+) -> Json<RegistrySnapshot> {
+    state.provider_registry.merge_snapshot(snapshot).await;
+    Json(state.provider_registry.registry_snapshot().await)
 }
 
 #[tokio::main]
@@ -1077,7 +1166,12 @@ async fn main() {
     let provider_names: Vec<&str> = providers.iter().map(|p| p.name.as_str()).collect();
     tracing::info!(providers = ?provider_names, "RPC provider pool");
 
-    let registry = ProviderRegistry::new(providers);
+    let registry = ProviderRegistry::new_with_config(providers, build_registry_config(&config));
+    tracing::info!(
+        instance_id = registry.instance_id(),
+        public_url = ?registry.public_base_url(),
+        "Provider registry initialized"
+    );
 
     // Spawn background health checker.
     let health_interval = std::time::Duration::from_secs(config.health_check_interval_secs);
@@ -1085,6 +1179,13 @@ async fn main() {
     tracing::info!(
         interval_secs = config.health_check_interval_secs,
         "Background RPC health checker started"
+    );
+
+    let gossip_interval = std::time::Duration::from_secs(config.gossip_interval_secs);
+    let _gossip_handle = registry.spawn_gossip_task(gossip_interval);
+    tracing::info!(
+        interval_secs = config.gossip_interval_secs,
+        "Provider gossip sync started"
     );
 
     let simulation_timeout = std::time::Duration::from_secs(config.simulation_timeout_secs);
@@ -1142,7 +1243,10 @@ async fn main() {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600)); // Every hour
             loop {
                 interval.tick().await;
-                if let Err(e) = cleanup_store.cleanup_old_samples(retention_days as i32).await {
+                if let Err(e) = cleanup_store
+                    .cleanup_old_samples(retention_days as i32)
+                    .await
+                {
                     tracing::error!(error = %e, "Failed to cleanup old fee samples");
                 }
             }
@@ -1156,6 +1260,7 @@ async fn main() {
             Arc::clone(&registry),
             simulation_timeout,
         ),
+        provider_registry: Arc::clone(&registry),
         cache: SimulationCache::new(),
         insights_engine: InsightsEngine::new(),
         simulation_timeout,
@@ -1181,6 +1286,9 @@ async fn main() {
             }),
         )
         .route("/health", get(health_check))
+        .route("/registry/providers", get(registry_providers))
+        .route("/registry/peers", get(registry_peers))
+        .route("/registry/gossip", post(registry_gossip))
         .route("/auth/challenge", post(auth::challenge_handler))
         .route("/auth/verify", post(auth::verify_handler))
         // Fee market routes (public access)
