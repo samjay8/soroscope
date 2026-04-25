@@ -1,14 +1,15 @@
 #![cfg(test)]
 
-use soroban_sdk::testutils::{Address as _, BytesN as _};
-use soroban_sdk::{Address, BytesN, Env, String, crypto::Signature, testutils::ed25519::Sign};
 use crate::{Domain, Transfer, TypedDataAuth};
+use soroban_sdk::testutils::Address as _;
+use soroban_sdk::{Address, BytesN, Env, String};
 
 #[test]
 fn test_authorize_transfer_with_valid_signature() {
     let env = Env::default();
+    let zero = BytesN::from_array(&env, &[0u8; 32]);
     let contract_address = Address::generate(&env);
-    let signer = Address::generate(&env);
+    let _signer = Address::generate(&env);
     let from = Address::generate(&env);
     let to = Address::generate(&env);
 
@@ -39,9 +40,9 @@ fn test_authorize_transfer_with_valid_signature() {
     // This test structure shows the intent.
 
     // For now, just test that the hashes are computed correctly
-    assert!(!domain_hash.is_zero());
-    assert!(!struct_hash.is_zero());
-    assert!(!message_hash.is_zero());
+    assert_ne!(domain_hash, zero);
+    assert_ne!(struct_hash, zero);
+    assert_ne!(message_hash, zero);
 }
 
 #[test]

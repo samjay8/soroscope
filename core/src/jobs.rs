@@ -1,11 +1,13 @@
-use crate::errors::AppError;
+#![allow(dead_code)]
+
 use crate::insights::InsightsEngine;
 use crate::simulation::{SimulationEngine, SimulationResult, SorobanResources};
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{PgPool, Row, SqlitePool};
+use sqlx::any::AnyQueryResult;
+use sqlx::{PgPool, SqlitePool};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,20 +24,20 @@ pub enum DbPool {
 }
 
 impl DbPool {
-    pub async fn execute(&self, query: &str) -> Result<sqlx::AnyQueryResult, sqlx::Error> {
+    pub async fn execute(&self, query: &str) -> Result<AnyQueryResult, sqlx::Error> {
         match self {
             DbPool::Postgres(pool) => {
                 let result = sqlx::query(query).execute(pool).await?;
-                Ok(sqlx::any::AnyQueryResult {
+                Ok(AnyQueryResult {
                     rows_affected: result.rows_affected(),
                     last_insert_id: None,
                 })
             }
             DbPool::Sqlite(pool) => {
                 let result = sqlx::query(query).execute(pool).await?;
-                Ok(sqlx::any::AnyQueryResult {
+                Ok(AnyQueryResult {
                     rows_affected: result.rows_affected(),
-                    last_insert_id: result.last_insert_rowid().map(|id| id as u64),
+                    last_insert_id: Some(result.last_insert_rowid()),
                 })
             }
         }

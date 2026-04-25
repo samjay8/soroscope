@@ -17,13 +17,11 @@ use crate::fee_analytics::{FeeAnalyticsEngine, MarketConditions, ModelBreakdown}
 use crate::fee_collector::{FeeCollector, FeeCollectorConfig};
 use crate::fee_store::FeeStore;
 use crate::insights::InsightsEngine;
-use crate::jobs::{
-    JobId, JobQueue, JobQueueConfig, JobWorker, SubmitJobRequest, SubmitJobResponse,
-};
+use crate::jobs::{JobQueue, JobQueueConfig, JobWorker};
 use crate::rpc_provider::{ProviderRegistry, RpcProvider};
-use crate::simulation::{SimulationCache, SimulationEngine, SimulationResult};
+use crate::simulation::{SimulationCache, SimulationEngine, SimulationMode, SimulationResult};
 use axum::{
-    extract::{Json, Multipart, Path, State},
+    extract::{Json, Multipart, State},
     http::{HeaderMap, HeaderName, HeaderValue},
     middleware,
     routing::{get, post},
@@ -71,6 +69,9 @@ struct AppConfig {
     /// Simulation timeout in seconds (default 30).
     #[serde(default = "default_simulation_timeout_secs")]
     simulation_timeout_secs: u64,
+    /// Simulation execution mode: `failover` or `consensus`.
+    #[serde(default = "default_simulation_mode")]
+    simulation_mode: String,
     /// Database URL for job queue (PostgreSQL or SQLite)
     #[serde(default = "default_database_url")]
     database_url: String,
@@ -97,6 +98,10 @@ fn default_health_check_interval() -> u64 {
 
 fn default_simulation_timeout_secs() -> u64 {
     30
+}
+
+fn default_simulation_mode() -> String {
+    "failover".to_string()
 }
 
 fn default_database_url() -> String {
@@ -137,6 +142,7 @@ fn load_config() -> Result<AppConfig, ConfigError> {
         .set_default("rpc_providers", "")?
         .set_default("health_check_interval_secs", 30)?
         .set_default("simulation_timeout_secs", 30)?
+        .set_default("simulation_mode", "failover")?
         .set_default("database_url", "sqlite://soroscope.db")?
         .set_default("job_timeout_secs", 300)?
         .set_default("max_concurrent_jobs", 10)?
@@ -188,6 +194,7 @@ struct AppState {
     /// Simulation timeout for RPC requests
     simulation_timeout: std::time::Duration,
     /// Job queue for background task processing
+    #[allow(dead_code)]
     job_queue: JobQueue,
     /// Fee market analytics engine
     fee_analytics_engine: FeeAnalyticsEngine,
@@ -398,30 +405,33 @@ fn to_report(result: &SimulationResult, insights_engine: &InsightsEngine) -> Res
                 })
                 .collect()
         }),
-        ttl_analysis: result.ttl_analysis.as_ref().map(|ttl| TtlAnalysisApiReport {
-            current_ledger: ttl.current_ledger,
-            touched_entries: ttl
-                .touched_entries
-                .iter()
-                .map(|e| TtlEntryApiReport {
-                    key: e.key.clone(),
-                    live_until_ledger: e.live_until_ledger,
-                    remaining_ledgers: e.remaining_ledgers,
-                })
-                .collect(),
-            extend_ttl_suggestions: ttl
-                .extend_ttl_suggestions
-                .iter()
-                .map(|s| ExtendTtlSuggestionApi {
-                    key: s.key.clone(),
-                    current_live_until_ledger: s.current_live_until_ledger,
-                    remaining_ledgers: s.remaining_ledgers,
-                    extend_to_ledger: s.extend_to_ledger,
-                    ledgers_to_extend_by: s.ledgers_to_extend_by,
-                    suggested_operation: s.suggested_operation.clone(),
-                })
-                .collect(),
-        }),
+        ttl_analysis: result
+            .ttl_analysis
+            .as_ref()
+            .map(|ttl| TtlAnalysisApiReport {
+                current_ledger: ttl.current_ledger,
+                touched_entries: ttl
+                    .touched_entries
+                    .iter()
+                    .map(|e| TtlEntryApiReport {
+                        key: e.key.clone(),
+                        live_until_ledger: e.live_until_ledger,
+                        remaining_ledgers: e.remaining_ledgers,
+                    })
+                    .collect(),
+                extend_ttl_suggestions: ttl
+                    .extend_ttl_suggestions
+                    .iter()
+                    .map(|s| ExtendTtlSuggestionApi {
+                        key: s.key.clone(),
+                        current_live_until_ledger: s.current_live_until_ledger,
+                        remaining_ledgers: s.remaining_ledgers,
+                        extend_to_ledger: s.extend_to_ledger,
+                        ledgers_to_extend_by: s.ledgers_to_extend_by,
+                        suggested_operation: s.suggested_operation.clone(),
+                    })
+                    .collect(),
+            }),
         nutrition: NutritionReport {
             efficiency_score: insights_report.efficiency_score,
             insights: insights_report
@@ -802,9 +812,7 @@ fn write_temp_wasm(bytes: &[u8]) -> Result<std::path::PathBuf, AppError> {
 async fn fee_recommend(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<FeeRecommendationResponse>, AppError> {
-    use crate::fee_analytics::TrendDirection;
-
-    tracing::info("Generating fee recommendation");
+    tracing::info!("Generating fee recommendation");
 
     // Get recent samples for analysis
     let samples = state
@@ -821,14 +829,13 @@ async fn fee_recommend(
 
     // Generate prediction
     let prediction = state.fee_analytics_engine.predict(&samples, current_ledger);
-    let market_conditions = state.fee_analytics_engine.get_market_conditions(&samples, current_ledger);
+    let market_conditions = state
+        .fee_analytics_engine
+        .get_market_conditions(&samples, current_ledger);
     let model_breakdown = state.fee_analytics_engine.get_model_breakdown(&samples);
 
     // Determine recommended bid based on prediction
-    let (recommended_bid, expected_ledgers) = (
-        prediction.priority_bid,
-        1,
-    );
+    let (recommended_bid, expected_ledgers) = (prediction.priority_bid, 1);
 
     Ok(Json(FeeRecommendationResponse {
         recommended_bid,
@@ -859,7 +866,7 @@ async fn fee_recommend(
 async fn fee_history(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<FeeHistoryResponse>, AppError> {
-    tracing::info("Fetching fee history");
+    tracing::info!("Fetching fee history");
 
     let limit = 50; // Default limit
     let samples = state
@@ -892,7 +899,7 @@ async fn fee_history(
 async fn fee_analytics(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    tracing::info("Fetching fee analytics");
+    tracing::info!("Fetching fee analytics");
 
     // Get recent samples for analysis
     let samples = state
@@ -907,7 +914,9 @@ async fn fee_analytics(
         .unwrap_or(0);
 
     let prediction = state.fee_analytics_engine.predict(&samples, current_ledger);
-    let market_conditions = state.fee_analytics_engine.get_market_conditions(&samples, current_ledger);
+    let market_conditions = state
+        .fee_analytics_engine
+        .get_market_conditions(&samples, current_ledger);
     let model_breakdown = state.fee_analytics_engine.get_model_breakdown(&samples);
 
     let response = serde_json::json!({
@@ -1088,10 +1097,13 @@ async fn main() {
     );
 
     let simulation_timeout = std::time::Duration::from_secs(config.simulation_timeout_secs);
+    let simulation_mode = SimulationMode::from_config(&config.simulation_mode)
+        .expect("Invalid simulation mode configuration");
     tracing::info!(
         timeout_secs = config.simulation_timeout_secs,
         "Simulation timeout configured"
     );
+    tracing::info!(mode = %simulation_mode, "Simulation mode configured");
 
     // ── Fee Market Setup ────────────────────────────────────────────────
     let database_url = &config.database_url;
@@ -1111,6 +1123,27 @@ async fn main() {
 
     let fee_store = Arc::new(FeeStore::new(db_pool.clone()));
     let fee_analytics_engine = FeeAnalyticsEngine::new();
+    let job_queue_config = JobQueueConfig {
+        job_timeout_secs: config.job_timeout_secs,
+        max_concurrent_jobs: config.max_concurrent_jobs,
+        ..JobQueueConfig::default()
+    };
+    let job_queue = JobQueue::new(database_url, job_queue_config.clone())
+        .await
+        .expect("Failed to initialize job queue");
+    let job_worker = JobWorker::new(
+        job_queue.clone(),
+        SimulationEngine::with_registry_and_timeout_and_mode(
+            Arc::clone(&registry),
+            simulation_timeout,
+            simulation_mode,
+        ),
+        InsightsEngine::new(),
+        job_queue_config,
+    );
+    tokio::spawn(async move {
+        job_worker.run().await;
+    });
 
     // Start background fee collector if enabled
     if config.fee_analysis_enabled {
@@ -1142,7 +1175,10 @@ async fn main() {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600)); // Every hour
             loop {
                 interval.tick().await;
-                if let Err(e) = cleanup_store.cleanup_old_samples(retention_days as i32).await {
+                if let Err(e) = cleanup_store
+                    .cleanup_old_samples(retention_days as i32)
+                    .await
+                {
                     tracing::error!(error = %e, "Failed to cleanup old fee samples");
                 }
             }
@@ -1152,13 +1188,15 @@ async fn main() {
     }
 
     let app_state = Arc::new(AppState {
-        engine: SimulationEngine::with_registry_and_timeout(
+        engine: SimulationEngine::with_registry_and_timeout_and_mode(
             Arc::clone(&registry),
             simulation_timeout,
+            simulation_mode,
         ),
         cache: SimulationCache::new(),
         insights_engine: InsightsEngine::new(),
         simulation_timeout,
+        job_queue,
         fee_analytics_engine,
         fee_store,
     });
@@ -1320,6 +1358,11 @@ mod tests {
     fn test_app_config_default_simulation_timeout() {
         // Verify the default timeout function returns 30 seconds
         assert_eq!(default_simulation_timeout_secs(), 30);
+    }
+
+    #[test]
+    fn test_app_config_default_simulation_mode() {
+        assert_eq!(default_simulation_mode(), "failover");
     }
 
     #[test]
