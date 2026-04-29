@@ -5,6 +5,7 @@ use axum::{
 };
 use serde::Serialize;
 use thiserror::Error;
+use utoipa::ToSchema;
 
 use crate::simulation::SimulationError;
 
@@ -24,9 +25,13 @@ pub enum AppError {
     Unauthorized(String),
 }
 
-#[derive(Serialize)]
-struct ErrorResponse {
+#[derive(Serialize, ToSchema)]
+pub struct ErrorResponse {
+    /// Error type identifier (e.g., "NOT_FOUND", "BAD_REQUEST")
+    #[schema(description = "Error type identifier (e.g., 'NOT_FOUND', 'BAD_REQUEST')")]
     error: String,
+    /// Human-readable error message
+    #[schema(description = "Human-readable error message")]
     message: String,
 }
 

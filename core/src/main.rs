@@ -44,12 +44,16 @@ use utoipa_swagger_ui::SwaggerUi;
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 struct AppConfig {
+    /// Port for the HTTP server
     server_port: u16,
+    /// Rust log level (e.g., "info", "debug")
     rust_log: String,
     /// Primary RPC URL — used as a single-provider fallback when
     /// `RPC_PROVIDERS` is not set.
     soroban_rpc_url: String,
+    /// JWT secret for authentication
     jwt_secret: String,
+    /// Stellar network passphrase
     network_passphrase: String,
     /// Redis URL reserved for the distributed cache migration (issue #65).
     /// Unused in the MVP in-memory implementation — present so the config
@@ -210,34 +214,40 @@ pub struct AnalyzeRequest {
 #[derive(Serialize, ToSchema)]
 pub struct ResourceReport {
     /// CPU instructions consumed
-    #[schema(example = 1500)]
+    #[schema(example = 1500, description = "CPU instructions consumed by the contract call")]
     pub cpu_instructions: u64,
     /// RAM bytes consumed
-    #[schema(example = 3000)]
+    #[schema(example = 3000, description = "RAM bytes consumed by the contract call")]
     pub ram_bytes: u64,
     /// Ledger read bytes
-    #[schema(example = 1024)]
+    #[schema(example = 1024, description = "Ledger read bytes during the contract call")]
     pub ledger_read_bytes: u64,
     /// Ledger write bytes
-    #[schema(example = 512)]
+    #[schema(example = 512, description = "Ledger write bytes during the contract call")]
     pub ledger_write_bytes: u64,
     /// Transaction size in bytes
-    #[schema(example = 450)]
+    #[schema(example = 450, description = "Transaction size in bytes")]
     pub transaction_size_bytes: u64,
     /// Estimated cost in stroops
-    #[schema(example = 1000)]
+    #[schema(example = 1000, description = "Estimated cost in stroops")]
     pub cost_stroops: u64,
     /// Report showing which data was injected vs live
+    #[schema(description = "State dependency report for the simulation")]
     pub state_dependency: Option<Vec<StateDependencyReport>>,
     /// TTL status for touched ledger entries and extension suggestions.
+    #[schema(description = "TTL analysis report for touched ledger entries")]
     pub ttl_analysis: Option<TtlAnalysisApiReport>,
     /// Efficiency score (0–100) and optimisation insights.
+    #[schema(description = "Efficiency score and optimisation insights")]
     pub nutrition: NutritionReport,
     /// Cross-contract call graph
+    #[schema(description = "Cross-contract call graph")]
     pub call_graph: Option<crate::simulation::CallGraph>,
     /// Call graph in Mermaid format
+    #[schema(description = "Call graph in Mermaid format")]
     pub call_graph_mermaid: Option<String>,
     /// Snapshot of the ledger state used/touched during simulation
+    #[schema(description = "Snapshot of the ledger state used/touched during simulation")]
     pub state_snapshot: Option<crate::simulation::SimulationStateSnapshot>,
 }
 

@@ -60,10 +60,20 @@ pub enum SimulationError {
 /// Soroban resource consumption data
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Default)]
 pub struct SorobanResources {
+    /// CPU instructions consumed by the contract call
+    #[schema(description = "CPU instructions consumed by the contract call")]
     pub cpu_instructions: u64,
+    /// RAM bytes consumed by the contract call
+    #[schema(description = "RAM bytes consumed by the contract call")]
     pub ram_bytes: u64,
+    /// Ledger read bytes during the contract call
+    #[schema(description = "Ledger read bytes during the contract call")]
     pub ledger_read_bytes: u64,
+    /// Ledger write bytes during the contract call
+    #[schema(description = "Ledger write bytes during the contract call")]
     pub ledger_write_bytes: u64,
+    /// Transaction size in bytes
+    #[schema(description = "Transaction size in bytes")]
     pub transaction_size_bytes: u64,
 }
 
@@ -71,10 +81,13 @@ pub struct SorobanResources {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct OptimizationBuffer {
     /// The original RPC estimation
+    #[schema(description = "The original RPC estimation")]
     pub estimated: u64,
     /// The absolute minimum found
+    #[schema(description = "The absolute minimum found")]
     pub absolute_minimum: u64,
     /// The percentage buffer between estimate and minimum
+    #[schema(description = "The percentage buffer between estimate and minimum")]
     pub buffer_percentage: f64,
 }
 
@@ -2064,20 +2077,7 @@ mod tests {
     // ── Multi-auth tests ──────────────────────────────────────────────────────
 
     #[test]
-    fn test_build_root_invocation_structure() {
-        use soroban_sdk::xdr::SorobanAuthorizedFunction;
-
-        let contract_hash = [1u8; 32];
-        let addr = ScAddress::Contract(Hash(contract_hash));
-        let sym: ScSymbol = "transfer".try_into().unwrap();
-        let args: VecM<ScVal> = vec![ScVal::Bool(true)].try_into().unwrap();
-
-        let inv = SimulationEngine::build_root_invocation(addr, sym.clone(), args);
-
-        match &inv.function {
-            SorobanAuthorizedFunction::ContractFn(f) => {
-                assert_eq!(f.function_name, sym);
-            }
+    fn test_build_root_invocation_structure
             _ => panic!("unexpected function type"),
         }
         assert_eq!(inv.sub_invocations.len(), 0);
