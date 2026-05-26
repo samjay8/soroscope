@@ -19,7 +19,6 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 serde_json = "1.0"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 sha2 = "0.10"
-serde_json = "1.0"
 thiserror = "1.0"
 dotenvy = "0.15"
 config = "0.14"
@@ -31,13 +30,11 @@ tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 utoipa = { version = "4", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "7", features = ["axum"] }
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 base64 = "0.22"
 hex = "0.4"
 stellar-strkey = "0.0.9"
 jsonwebtoken = "9"
 ed25519-dalek = "1"
-sha2 = "0.10"
 rand = "0.8"
 moka = { version = "0.12", features = ["future"] }
 sled = "0.34"
@@ -46,3 +43,6 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 rsa = "0.9"
+
+[dev-dependencies]
+proptest = "1.4.0"

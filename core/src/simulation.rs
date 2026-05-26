@@ -1,7 +1,12 @@
 use crate::parser::ArgParser;
 use crate::rpc_provider::ProviderRegistry;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+<<<<<<< Updated upstream
 // use moka::future::Cache;
+=======
+use ed25519_dalek::Signer as Ed25519Signer;
+use moka::future::Cache;
+>>>>>>> Stashed changes
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -2221,7 +2226,7 @@ impl SimulationEngine {
         root.map(|r| CallGraph { root: r })
     }
 
-    fn extract_touched_ledger_keys(&self, transaction_data: &str) -> Vec<String> {
+    pub(crate) fn extract_touched_ledger_keys(&self, transaction_data: &str) -> Vec<String> {
         if transaction_data.is_empty() {
             return Vec::new();
         }
@@ -2369,7 +2374,7 @@ impl SimulationEngine {
         })
     }
 
-    fn build_extend_ttl_suggestions(
+    pub(crate) fn build_extend_ttl_suggestions(
         touched_entries: &[TtlEntryReport],
         latest_ledger: u64,
     ) -> Vec<ExtendTtlSuggestion> {
@@ -2440,7 +2445,7 @@ impl SimulationEngine {
         })
     }
 
-    fn extract_footprint_from_xdr(&self, transaction_data: &str) -> (u64, u64) {
+    pub(crate) fn extract_footprint_from_xdr(&self, transaction_data: &str) -> (u64, u64) {
         if transaction_data.is_empty() {
             return (0, 0);
         }
@@ -2497,7 +2502,7 @@ impl SimulationEngine {
 
     /// Estimate the size of an ScVal in bytes
     #[allow(clippy::only_used_in_recursion)]
-    fn estimate_scval_size(&self, scval: &soroban_sdk::xdr::ScVal) -> u64 {
+    pub(crate) fn estimate_scval_size(&self, scval: &soroban_sdk::xdr::ScVal) -> u64 {
         use soroban_sdk::xdr::ScVal;
         match scval {
             ScVal::Bool(_) => 1,
@@ -2529,7 +2534,7 @@ impl SimulationEngine {
         }
     }
 
-    fn calculate_cost(&self, resources: &SorobanResources) -> u64 {
+    pub(crate) fn calculate_cost(&self, resources: &SorobanResources) -> u64 {
         let cpu_cost = resources.cpu_instructions / 10000;
         let ram_cost = resources.ram_bytes / 1024;
         let ledger_cost = (resources.ledger_read_bytes + resources.ledger_write_bytes) / 1024;
@@ -2539,7 +2544,7 @@ impl SimulationEngine {
     /// Create invoke transaction for contract call
     ///
     /// Creates a transaction with InvokeHostFunctionOp containing InvokeContract host function.
-    fn create_invoke_transaction(
+    pub(crate) fn create_invoke_transaction(
         &self,
         contract_id: &str,
         function_name: &str,
@@ -2614,7 +2619,7 @@ impl SimulationEngine {
         }
     }
 
-    fn parse_sc_val_arg(&self, arg: &str) -> Result<ScVal, SimulationError> {
+    pub(crate) fn parse_sc_val_arg(&self, arg: &str) -> Result<ScVal, SimulationError> {
         let arg = arg.trim();
 
         // 1. Try parsing as JSON first (for complex types like Maps and Vecs)

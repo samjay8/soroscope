@@ -117,8 +117,35 @@ pub enum DataKey {
     Paused,
 }
 
+<<<<<<< Updated upstream
 fn check_not_paused(e: &Env, operation: u32) -> Result<(), Error> {
     if EmergencyGuard::is_paused(e.clone(), operation) {
+=======
+pub const MAX_FEE_BPS: i128 = 100;
+pub const DEFAULT_BASE_FEE_BPS: i128 = 30;
+pub const DEFAULT_FEE_TIMELOCK_LEDGERS: u32 = 120;
+
+pub const LOW_VOLATILITY_THRESHOLD_BPS: i128 = 100;
+pub const MEDIUM_VOLATILITY_THRESHOLD_BPS: i128 = 250;
+pub const HIGH_VOLATILITY_THRESHOLD_BPS: i128 = 500;
+
+pub const LOW_VOLATILITY_FEE_BPS: i128 = 40;
+pub const MEDIUM_VOLATILITY_FEE_BPS: i128 = 70;
+pub const HIGH_VOLATILITY_FEE_BPS: i128 = 100;
+
+#[soroban_sdk::contractclient(name = "PriceOracleClient")]
+pub trait PriceOracle {
+    fn latest_price(e: Env) -> i128;
+}
+
+fn check_paused(e: &Env) -> Result<(), Error> {
+    let paused: bool = e
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false);
+    if paused {
+>>>>>>> Stashed changes
         Err(Error::Paused)
     } else {
         Ok(())
