@@ -516,6 +516,11 @@ impl LiquidityPool {
         old_admin: Address,
         new_admin: Address,
     ) -> Result<(), Error> {
+        let admins = EmergencyGuard::get_admins(e.clone());
+        if !admins.iter().any(|admin| admin == old_admin) {
+            return Err(Error::Unauthorized);
+        }
+
         EmergencyGuard::add_admin(e.clone(), approvers.clone(), new_admin.clone())
             .map_err(|_| Error::Unauthorized)?;
         EmergencyGuard::remove_admin(e.clone(), approvers, old_admin.clone())

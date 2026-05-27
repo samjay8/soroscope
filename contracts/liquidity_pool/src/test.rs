@@ -1191,6 +1191,63 @@ fn test_rotate_admin_replaces_guard_and_pool_admin() {
 }
 
 #[test]
+fn test_rotated_admin_controls_pool_admin_functions() {
+    let e = Env::default();
+    e.mock_all_auths();
+
+    let contract_id = e.register(LiquidityPool, ());
+    let client = LiquidityPoolClient::new(&e, &contract_id);
+
+    let admin = Address::generate(&e);
+    let new_admin = Address::generate(&e);
+    let token_a = e
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let token_b = e
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+
+    client.initialize(&admin, &token_a, &token_b);
+    client.rotate_admin(&vec![&e, admin.clone()], &admin, &new_admin);
+
+    assert_eq!(client.try_set_fee(&99), Ok(Ok(())));
+    assert_eq!(client.get_fee(), 99);
+    assert_eq!(client.get_admin(), new_admin);
+}
+
+#[test]
+fn test_failed_rotate_admin_does_not_add_new_admin() {
+    let e = Env::default();
+    e.mock_all_auths();
+
+    let contract_id = e.register(LiquidityPool, ());
+    let client = LiquidityPoolClient::new(&e, &contract_id);
+
+    let admin = Address::generate(&e);
+    let missing_old_admin = Address::generate(&e);
+    let new_admin = Address::generate(&e);
+    let token_a = e
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let token_b = e
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+
+    client.initialize(&admin, &token_a, &token_b);
+
+    assert_eq!(
+        client.try_rotate_admin(&vec![&e, admin.clone()], &missing_old_admin, &new_admin),
+        Err(Ok(Error::Unauthorized))
+    );
+
+    let admins = client.get_admins();
+    assert_eq!(admins.len(), 1);
+    assert_eq!(admins.get(0).unwrap(), admin);
+    assert!(!admins.iter().any(|a| a == new_admin));
+    assert_eq!(client.get_admin(), admin);
+}
+
+#[test]
 fn test_add_then_remove_admin_enforces_rotation_membership() {
     let e = Env::default();
     e.mock_all_auths();
