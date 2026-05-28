@@ -3642,6 +3642,7 @@ dependencies = [
 name = "soroban-token-contract"
 version = "0.0.0"
 dependencies = [
+ "emergency_guard",
  "soroban-sdk",
 ]
 
